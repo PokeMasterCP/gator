@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gator/internal/database"
+	"gator/internal/rss"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,5 +107,37 @@ func HandlerReset(s *State, c Command) error {
 	}
 
 	fmt.Println("successfully reset database")
+	return nil
+}
+
+func HandlerUsers(s *State, c Command) error {
+	if len(c.Arguments) != 0 {
+		return fmt.Errorf("users does not take any arguments")
+	}
+
+	users, err := s.Db.GetAllUsers(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get all users from db: %w", err)
+	}
+
+	for _, user := range users {
+		if user == s.Conf.CurrentUserName {
+			fmt.Printf("* %s (current)\n", user)
+		} else {
+			fmt.Printf("* %s\n", user)
+		}
+	}
+
+	return nil
+}
+
+func HandlerAgg(s *State, c Command) error {
+	feed, err := rss.FetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	if err != nil {
+		return err
+	}
+
+	rss.CleanHTML(feed)
+	fmt.Println(*feed)
 	return nil
 }

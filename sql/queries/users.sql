@@ -16,3 +16,6 @@ LIMIT 1;
 
 -- name: ClearUsersTable :exec
 DELETE FROM users;
+
+-- name: GetAllUsers :many
+SELECT name FROM users;

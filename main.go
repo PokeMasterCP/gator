@@ -35,6 +35,8 @@ func main() {
 	allCommands.Register("login", config.HandlerLogin)
 	allCommands.Register("register", config.HandlerRegister)
 	allCommands.Register("reset", config.HandlerReset)
+	allCommands.Register("users", config.HandlerUsers)
+	allCommands.Register("agg", config.HandlerAgg)
 
 	commandName := os.Args[1]
 	args := os.Args[2:]
