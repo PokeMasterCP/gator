@@ -37,6 +37,8 @@ func main() {
 	allCommands.Register("reset", config.HandlerReset)
 	allCommands.Register("users", config.HandlerUsers)
 	allCommands.Register("agg", config.HandlerAgg)
+	allCommands.Register("addfeed", config.HandlerAddFeed)
+	allCommands.Register("feeds", config.HandlerFeeds)
 
 	commandName := os.Args[1]
 	args := os.Args[2:]
