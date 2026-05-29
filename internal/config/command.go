@@ -198,3 +198,36 @@ func HandlerFeeds(s *State, c Command) error {
 	}
 	return nil
 }
+
+func HandlerFollow(s *State, c Command) error {
+	if len(c.Arguments) != 1 {
+		return fmt.Errorf("follow command requires <url> argument")
+	}
+
+	url := c.Arguments[0]
+	currentUserID, err := s.Db.GetUserByName(context.Background(), s.Conf.CurrentUserName)
+	if err != nil {
+		return fmt.Errorf("failed to get user ID by name: %w", err)
+	}
+
+	feedID, err := s.Db.GetFeedIDByURL(context.Background(), url)
+	if err != nil {
+		return fmt.Errorf("failed to get feed name by url: %w", err)
+	}
+
+	arg := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    currentUserID.ID,
+		FeedID:    feedID,
+	}
+
+	followedFeed, err := s.Db.CreateFeedFollow(context.Background(), arg)
+	if err != nil {
+		return fmt.Errorf("failed to follow feed: %w", err)
+	}
+
+	fmt.Printf("%s has followed %s", followedFeed.UserName, followedFeed.FeedName)
+	return nil
+}
