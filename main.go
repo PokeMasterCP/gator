@@ -37,9 +37,10 @@ func main() {
 	allCommands.Register("reset", config.HandlerReset)
 	allCommands.Register("users", config.HandlerUsers)
 	allCommands.Register("agg", config.HandlerAgg)
-	allCommands.Register("addfeed", config.HandlerAddFeed)
+	allCommands.Register("addfeed", config.MiddlewareLoggedIn(config.HandlerAddFeed))
 	allCommands.Register("feeds", config.HandlerFeeds)
-	allCommands.Register("follow", config.HandlerFollow)
+	allCommands.Register("follow", config.MiddlewareLoggedIn(config.HandlerFollow))
+	allCommands.Register("following", config.MiddlewareLoggedIn(config.HandlerFollowing))
 
 	commandName := os.Args[1]
 	args := os.Args[2:]

@@ -142,25 +142,23 @@ func HandlerAgg(s *State, c Command) error {
 	return nil
 }
 
-func HandlerAddFeed(s *State, c Command) error {
+func HandlerAddFeed(s *State, c Command, user database.User) error {
 	if len(c.Arguments) != 2 {
 		return fmt.Errorf("addfeed expects <feed name> <feed URL>")
 	}
 
-	currentUser, err := s.Db.GetUserByName(context.Background(), s.Conf.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("failed to grab %s from database: %w", s.Conf.CurrentUserName, err)
-	}
-
 	feedName := c.Arguments[0]
 	feedURL := c.Arguments[1]
+	createdAt := time.Now()
+	updatedAt := time.Now()
+
 	args := database.CreateFeedParams{
 		ID:        uuid.New(),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
 		Name:      feedName,
 		Url:       feedURL,
-		UserID:    currentUser.ID,
+		UserID:    user.ID,
 	}
 
 	newFeed, err := s.Db.CreateFeed(context.Background(), args)
@@ -170,6 +168,17 @@ func HandlerAddFeed(s *State, c Command) error {
 
 	fmt.Printf("successfully added %s to database\n", newFeed.Name)
 
+	followingArgs := database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
+		UserID:    user.ID,
+		FeedID:    newFeed.ID,
+	}
+
+	if _, err := s.Db.CreateFeedFollow(context.Background(), followingArgs); err != nil {
+		return fmt.Errorf("failed to follow new feed: %w", err)
+	}
 	return nil
 }
 
@@ -190,7 +199,7 @@ func HandlerFeeds(s *State, c Command) error {
 
 		user, err := s.Db.GetUserByID(context.Background(), allFeeds[i].UserID)
 		if err != nil {
-			fmt.Printf("failed to grab user %s from db: %w")
+			fmt.Printf("failed to grab user info from db: %w", err)
 			continue
 		}
 
@@ -199,17 +208,12 @@ func HandlerFeeds(s *State, c Command) error {
 	return nil
 }
 
-func HandlerFollow(s *State, c Command) error {
+func HandlerFollow(s *State, c Command, user database.User) error {
 	if len(c.Arguments) != 1 {
 		return fmt.Errorf("follow command requires <url> argument")
 	}
 
 	url := c.Arguments[0]
-	currentUserID, err := s.Db.GetUserByName(context.Background(), s.Conf.CurrentUserName)
-	if err != nil {
-		return fmt.Errorf("failed to get user ID by name: %w", err)
-	}
-
 	feedID, err := s.Db.GetFeedIDByURL(context.Background(), url)
 	if err != nil {
 		return fmt.Errorf("failed to get feed name by url: %w", err)
@@ -219,7 +223,7 @@ func HandlerFollow(s *State, c Command) error {
 		ID:        uuid.New(),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
-		UserID:    currentUserID.ID,
+		UserID:    user.ID,
 		FeedID:    feedID,
 	}
 
@@ -230,4 +234,37 @@ func HandlerFollow(s *State, c Command) error {
 
 	fmt.Printf("%s has followed %s", followedFeed.UserName, followedFeed.FeedName)
 	return nil
+}
+
+func HandlerFollowing(s *State, c Command, user database.User) error {
+	if len(c.Arguments) != 0 {
+		return fmt.Errorf("following command doesn't accept arguments")
+	}
+
+	followedFeeds, err := s.Db.GetFeedFollowsForUser(context.Background(), user.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get user from db: %w", err)
+	}
+
+	if len(followedFeeds) == 0 {
+		fmt.Println("You aren't following any feeds")
+		return nil
+	}
+
+	fmt.Println("You are following:")
+	for i := range followedFeeds {
+		fmt.Printf("* %s\n", followedFeeds[i].Feed)
+	}
+
+	return nil
+}
+
+func MiddlewareLoggedIn(handler func(s *State, cmd Command, user database.User) error) func(*State, Command) error {
+	return func(s *State, cmd Command) error {
+		user, err := s.Db.GetUserByName(context.Background(), s.Conf.CurrentUserName)
+		if err != nil {
+			return fmt.Errorf("failed to query user: %w", err)
+		}
+		return handler(s, cmd, user)
+	}
 }
