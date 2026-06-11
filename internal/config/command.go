@@ -2,12 +2,17 @@ package config
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"gator/internal/database"
 	"gator/internal/rss"
+	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type State struct {
@@ -132,14 +137,22 @@ func HandlerUsers(s *State, c Command) error {
 }
 
 func HandlerAgg(s *State, c Command) error {
-	feed, err := rss.FetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
-	if err != nil {
-		return err
+	if len(c.Arguments) != 1 {
+		return fmt.Errorf("agg requires a refresh internal in the form of <1s> <1m> <1h>")
 	}
 
-	rss.CleanHTML(feed)
-	fmt.Println(*feed)
-	return nil
+	time_between_reqs, err := time.ParseDuration(c.Arguments[0])
+	if err != nil {
+		return fmt.Errorf("incorrect format: %w", err)
+	}
+
+	fmt.Printf("Collecting feeds every %v\n", time_between_reqs)
+
+	ticker := time.NewTicker(time_between_reqs)
+	for ; ; <-ticker.C {
+		fmt.Println("Grabbing next feed...")
+		scrapeFeeds(s)
+	}
 }
 
 func HandlerAddFeed(s *State, c Command, user database.User) error {
@@ -199,7 +212,7 @@ func HandlerFeeds(s *State, c Command) error {
 
 		user, err := s.Db.GetUserByID(context.Background(), allFeeds[i].UserID)
 		if err != nil {
-			fmt.Printf("failed to grab user info from db: %w", err)
+			fmt.Printf("failed to grab user info from db: %s", err)
 			continue
 		}
 
@@ -267,4 +280,149 @@ func MiddlewareLoggedIn(handler func(s *State, cmd Command, user database.User) 
 		}
 		return handler(s, cmd, user)
 	}
+}
+
+func HandlerUnfollow(s *State, c Command, user database.User) error {
+	if len(c.Arguments) != 1 {
+		return fmt.Errorf("unfollow only accepts one argument: <url>")
+	}
+
+	ctx := context.Background()
+
+	feedURL := c.Arguments[0]
+	feedID, err := s.Db.GetFeedIDByURL(ctx, feedURL)
+	if err != nil {
+		return fmt.Errorf("failed to query url: %w", err)
+	}
+
+	arg := database.DeleteFeedFollowParams{
+		UserID: user.ID,
+		FeedID: feedID,
+	}
+
+	if err := s.Db.DeleteFeedFollow(ctx, arg); err != nil {
+		return fmt.Errorf("failed to unfollow: %w", err)
+	}
+
+	return nil
+}
+
+func HandlerBrowse(s *State, c Command, user database.User) error {
+	var limit int32
+	if len(c.Arguments) > 1 {
+		return fmt.Errorf("browse takes an optional number of posts to view")
+	}
+
+	if len(c.Arguments) == 1 {
+		parsedInt, err := strconv.Atoi(c.Arguments[0])
+		if err != nil {
+			return fmt.Errorf("enter an int only as the argument")
+		}
+		if parsedInt <= 0 {
+			return fmt.Errorf("enter a positive number only")
+		}
+		limit = int32(parsedInt)
+	} else {
+		limit = 2
+	}
+
+	arg := database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  limit,
+	}
+	posts, err := s.Db.GetPostsForUser(context.Background(), arg)
+	if err != nil {
+		return fmt.Errorf("failed to get posts: %w", err)
+	}
+
+	for i := range posts {
+		title := posts[i].Title
+		description := posts[i].Description
+
+		fmt.Printf("Post %d\nTitle: %s\nDescription: %v\n\n", i, title, description)
+	}
+	return nil
+}
+
+func scrapeFeeds(s *State) {
+	ctx := context.Background()
+	nextFeed, err := s.Db.GetNextFeedToFetch(ctx)
+	if err != nil {
+		fmt.Printf("failed to get next feed from db: %s\n", err)
+		return
+	}
+
+	now := time.Now()
+	arg := database.MarkFeedFetchedParams{UpdatedAt: now, ID: nextFeed.ID}
+	if err := s.Db.MarkFeedFetched(ctx, arg); err != nil {
+		fmt.Printf("failed to mark feed as fetched in db: %s\n", err)
+		return
+	}
+
+	feed, err := rss.FetchFeed(ctx, nextFeed.Url)
+	if err != nil {
+		fmt.Printf("failed to fetch feed from url: %s\n", err)
+		return
+	}
+
+	numPosts := 0
+	rss.CleanHTML(feed)
+	for i := range feed.Channel.Item {
+		postErr := createPost(s, feed.Channel.Item[i], nextFeed.ID)
+		if postErr != nil {
+			if isDuplicatePostURL(postErr) {
+				continue
+			}
+
+			fmt.Printf("failed to create post: %v\n", postErr)
+			continue
+		}
+		numPosts++
+	}
+
+	if numPosts == 0 {
+		fmt.Println("checked feed, no new posts to add")
+	} else {
+		fmt.Printf("successfully added %d posts\n", numPosts)
+	}
+}
+
+func createPost(s *State, post rss.RSSItem, feedID uuid.UUID) error {
+	pubTime, err := http.ParseTime(post.PubDate)
+	if err != nil {
+		pubTime = time.Time{}
+	}
+
+	description := sql.NullString{
+		String: post.Description,
+		Valid:  post.Description != "",
+	}
+
+	postArgs := database.CreatePostParams{
+		ID:          uuid.New(),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+		Title:       post.Title,
+		Url:         post.Link,
+		Description: description,
+		PublishedAt: sql.NullTime{
+			Time:  pubTime,
+			Valid: !pubTime.IsZero(),
+		},
+		FeedID: feedID,
+	}
+
+	if err := s.Db.CreatePost(context.Background(), postArgs); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func isDuplicatePostURL(err error) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return pqErr.Code == "23505" && pqErr.Constraint == "posts_url_key"
+	}
+	return false
 }

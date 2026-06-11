@@ -17,13 +17,13 @@ func main() {
 
 	conf, err := config.ReadConfig()
 	if err != nil {
-		log.Fatal("error reading config: %w", err)
+		log.Fatalf("error reading config: %v", err)
 	}
 
 	state := config.State{Conf: &conf}
 	db, err := sql.Open("postgres", conf.DbURL)
 	if err != nil {
-		log.Fatal("error connecting to database: %w", err)
+		log.Fatalf("error connecting to database: %v", err)
 	}
 
 	dbQueries := database.New(db)
@@ -41,6 +41,8 @@ func main() {
 	allCommands.Register("feeds", config.HandlerFeeds)
 	allCommands.Register("follow", config.MiddlewareLoggedIn(config.HandlerFollow))
 	allCommands.Register("following", config.MiddlewareLoggedIn(config.HandlerFollowing))
+	allCommands.Register("unfollow", config.MiddlewareLoggedIn(config.HandlerUnfollow))
+	allCommands.Register("browse", config.MiddlewareLoggedIn(config.HandlerBrowse))
 
 	commandName := os.Args[1]
 	args := os.Args[2:]
