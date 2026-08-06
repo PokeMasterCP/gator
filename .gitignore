@@ -1,0 +1,7 @@
+# Compiled binary
+/gator
+
+# Local config holds the database URL
+.gatorconfig.json
+
+.DS_Store

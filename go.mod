@@ -1,4 +1,4 @@
-module gator
+module github.com/PokeMasterCP/gator
 
 go 1.26.1
 

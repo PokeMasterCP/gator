@@ -2,8 +2,8 @@ package main
 
 import (
 	"database/sql"
-	"gator/internal/config"
-	"gator/internal/database"
+	"github.com/PokeMasterCP/gator/internal/config"
+	"github.com/PokeMasterCP/gator/internal/database"
 	"log"
 	"os"
 
@@ -24,6 +24,12 @@ func main() {
 	db, err := sql.Open("postgres", conf.DbURL)
 	if err != nil {
 		log.Fatalf("error connecting to database: %v", err)
+	}
+	defer db.Close()
+
+	// sql.Open only parses db_url; without a ping a bad one fails mid-command.
+	if err := db.Ping(); err != nil {
+		log.Fatalf("error reaching database at db_url: %v", err)
 	}
 
 	dbQueries := database.New(db)
